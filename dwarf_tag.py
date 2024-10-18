@@ -68,7 +68,7 @@ class Struct:
         name = self.die.attributes.get(DW_AT.name)
         return name.value if name else "(anonymous)"
 
-    def byte_size(self: DIE) -> int:
+    def byte_size(self) -> int:
         return get_DW_AT_byte_size(self.die)
 
 

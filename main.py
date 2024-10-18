@@ -14,11 +14,8 @@ from dwarf_tag import (
     DW_AT,
     DW_TAG,
 )
+import struct_dump as sd
 import sys
-
-var_name = "g_param"
-# file = "D:/workspace/Ecs/Ecm/Ecm.sdk/build/CcuCore0.elf"
-file = "D:/workspace/cx/learn/llvm/objdump/example.o"
 
 
 # return addr, size tuple if found
@@ -36,13 +33,13 @@ def find_sym_addr_size(elffile: ELFFile, symbol_name: str) -> tuple[int, int] | 
         return None
 
 
-def find_variable(die: DIE):
+def find_variable(die: DIE, var_name: str):
     if die.tag == DW_TAG.variable and die.attributes[DW_AT.name].value == bytes(
         var_name, "ascii"
     ):
         return die
     for c in die.iter_children():
-        if find_variable(c):
+        if find_variable(c, var_name):
             return c
     return None
 
@@ -125,25 +122,136 @@ def process_struct(die: DIE, base_offset: int, prefix: str):
         process_member(child, base_offset, prefix)
 
 
-f = open(file, "rb")
-e = ELFFile(f)
-rst = find_sym_addr_size(e, var_name)
-if rst is None:
-    print("Not find variable in .symtab")
-    sys.exit(1)
-addr, size = rst
-print(f"addr {addr}, size {size}")
-if not e.has_dwarf_info():
-    print("No DWARF info")
-    sys.exit(1)
-d = e.get_dwarf_info()
-for CU in d.iter_CUs():
-    die = CU.get_top_DIE()
-    v = find_variable(die)
-if v is None:
-    print("Not find variable in dwarf")
-    sys.exit(1)
-t = v.attributes[DW_AT.type]
-var_type = d.get_DIE_from_refaddr(t.value)
-var_type = resolve_typedef(var_type)
-process_struct(var_type, 0, "")
+def register_with_name(die: DIE, name: str, d: sd.TypeDict) -> None:
+    if name not in d:
+        match die.tag:
+            case DW_TAG.typedef:
+                raise ValueError("typedef die should be resolved before calling")
+            case DW_TAG.base_type:
+                d[name] = sd.BaseMeta(name, BaseType(die).byte_size())
+            # TODO other types like enum, struct
+
+
+def register_in_typedict(die: DIE, d: sd.TypeDict) -> None:
+    match die.tag:
+        case DW_TAG.typedef:
+            name = Typedef(die).name()
+            register_with_name(resolve_typedef(die), name, d)
+        case DW_TAG.base_type:
+            name = BaseType(die).name()
+            register_with_name(die, name, d)
+        case DW_TAG.array_type:
+            # array need not to be registered
+            pass
+        case DW_TAG.structure_type:
+            s = Struct(die)
+            name = f"struct {s.tag_name()}"
+            register_with_name(die, name, d)
+        case DW_TAG.enumeration_type:
+            e = EnumType(die)
+            name = f"enum {e.tag_name()}"
+            register_with_name(die, name, d)
+        case _:
+            raise ValueError(f"Unknown tag {die.tag}")
+
+
+import json
+
+
+# class Encoder(json.JSONEncoder):
+#     def default(self, obj):
+#         try:
+#             return super().default(obj)
+#         except TypeError:
+#             return obj.__dict__
+
+
+def to_json(m: sd.Meta) -> str:
+    match m.kind:
+        case sd.Kind.base:
+            return f'{{"kind":"base","name":"{m.name}","size":{m.size}}}'
+        case sd.Kind.enum:
+            return f'{{"kind":"enum","name":"{m.name}","size":{m.size},"underlying_type":"{m.variant.underlying_type}"}}'
+        case sd.Kind.struct:
+            if len(m.variant.members) == 0:
+                member_str = "[]"
+            else:
+                member_str = "["
+                for mb in m.variant.members:
+                    member_str += f'{{"type":"{mb.type}","name":"{mb.name}","offset":{mb.offset}}},'
+                member_str = member_str[:-1]
+                member_str += "]"
+            return f'{{"kind":"struct","name":"{m.name}","size":{m.size},"members":{member_str}}}'
+
+
+def dict_to_json(top_type_name: str, d: sd.TypeDict) -> str:
+    if len(d) == 0:
+        return "[]"
+    s = "["
+    for k in d:
+        s += to_json(d[k]) + ","
+    s = s[:-1]  # remove last ','
+    s += "]"
+    return s
+
+
+def process_top_type(original_type: DIE):
+    resolved_type = resolve_typedef(original_type)
+    if resolved_type.tag != DW_TAG.structure_type:
+        print("top type is not a struct")
+        return
+    struct = Struct(resolved_type)
+    if original_type.tag == DW_TAG.typedef:
+        original_type_name = Typedef(original_type).name()
+    else:
+        original_type_name = f"struct {struct.tag_name()}"
+    top_struct = sd.StructMeta(original_type_name, struct.byte_size(), [])
+    for child in resolved_type.iter_children():
+        member = Member(child)
+        member_type = member.type()
+        register_in_typedict(member_type, sd.typedict)
+
+        top_struct.variant.members.append(
+            sd.Member(get_type_name(member_type), member.name(), member.member_offset())
+        )
+    sd.typedict[original_type_name] = top_struct
+
+    # sd.print_struct(top_struct)
+    # print("In the global type dict:")
+    # for key in sd.typedict:
+    #     print(key, sd.typedict[key])
+    s = dict_to_json(original_type_name, sd.typedict)
+    d = json.loads(s)
+    print("d=")
+    print(d)
+    print("dumps=")
+    print(json.dumps(d))
+
+
+def main(var_name: str, file: str):
+    with open(file, "rb") as f:
+        e = ELFFile(f)  # need to keep f open when e is being used
+        rst = find_sym_addr_size(e, var_name)
+        if rst is None:
+            print("Not find variable in .symtab")
+            sys.exit(1)
+        addr, size = rst
+        print(f"{var_name} is at addr {addr}, has size {size}")
+        if not e.has_dwarf_info():
+            print("No DWARF info")
+            sys.exit(1)
+        d = e.get_dwarf_info()
+        for CU in d.iter_CUs():
+            die = CU.get_top_DIE()
+            v = find_variable(die, var_name)
+        if v is None:
+            print("Not find variable in dwarf")
+            sys.exit(1)
+        t = v.attributes[DW_AT.type]
+        var_type = d.get_DIE_from_refaddr(t.value)
+        # process_struct(resolve_typedef(var_type), 0, "")
+        process_top_type(var_type)
+
+
+main("g_param", "D:/workspace/cx/learn/llvm/objdump/example.o")
+# "D:/workspace/Ecs/Ecm/Ecm.sdk/build/CcuCore0.elf"
