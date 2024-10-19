@@ -76,7 +76,7 @@ def member_type_size_str(die: DIE) -> str:
         case DW_TAG.base_type | DW_TAG.enumeration_type | DW_TAG.structure_type:
             return str(get_DW_AT_byte_size(die))
         case DW_TAG.typedef:
-            return get_type_size(die)
+            return str(get_type_size(die))
         case DW_TAG.array_type:
             arr = Array(die)
             elem_size = get_type_size(resolve_typedef(arr.element_type()))
@@ -128,7 +128,17 @@ def register_with_name(die: DIE, name: str, d: sd.TypeDict) -> None:
             case DW_TAG.typedef:
                 raise ValueError("typedef die should be resolved before calling")
             case DW_TAG.base_type:
-                d[name] = sd.BaseMeta(name, BaseType(die).byte_size())
+                d[name] = sd.BaseTypeMeta(
+                    name, BaseType(die).byte_size(), sd.BaseTypeKind.pointer
+                )  # TODO find out the kind
+            case DW_TAG.enumeration_type:
+                e = EnumType(die)
+                underlying_type = e.underlying_type()
+                underlying_type_name = get_DW_AT_name(underlying_type)
+                d[name] = sd.EnumMeta(name, e.byte_size(), underlying_type_name)
+                # underlying_type should be registered too
+                register_with_name(underlying_type, underlying_type_name, d)
+
             # TODO other types like enum, struct
 
 
@@ -155,33 +165,24 @@ def register_in_typedict(die: DIE, d: sd.TypeDict) -> None:
             raise ValueError(f"Unknown tag {die.tag}")
 
 
-import json
-
-
-# class Encoder(json.JSONEncoder):
-#     def default(self, obj):
-#         try:
-#             return super().default(obj)
-#         except TypeError:
-#             return obj.__dict__
-
-
 def to_json(m: sd.Meta) -> str:
-    match m.kind:
-        case sd.Kind.base:
-            return f'{{"kind":"base","name":"{m.name}","size":{m.size}}}'
-        case sd.Kind.enum:
-            return f'{{"kind":"enum","name":"{m.name}","size":{m.size},"underlying_type":"{m.variant.underlying_type}"}}'
-        case sd.Kind.struct:
-            if len(m.variant.members) == 0:
-                member_str = "[]"
-            else:
-                member_str = "["
-                for mb in m.variant.members:
-                    member_str += f'{{"type":"{mb.type}","name":"{mb.name}","offset":{mb.offset}}},'
-                member_str = member_str[:-1]
-                member_str += "]"
-            return f'{{"kind":"struct","name":"{m.name}","size":{m.size},"members":{member_str}}}'
+    # consider dataclass.asdict()
+    # match m.kind:
+    #     case sd.Kind.base:
+    #         return f'{{"kind":"base","name":"{m.name}","size":{m.size}}}'
+    #     case sd.Kind.enum:
+    #         return f'{{"kind":"enum","name":"{m.name}","size":{m.size},"underlying_type":"{m.variant.underlying_type}"}}'
+    #     case sd.Kind.struct:
+    #         if len(m.variant.members) == 0:
+    #             member_str = "[]"
+    #         else:
+    #             member_str = "["
+    #             for mb in m.variant.members:
+    #                 member_str += f'{{"type":"{mb.type}","name":"{mb.name}","offset":{mb.offset}}},'
+    #             member_str = member_str[:-1]
+    #             member_str += "]"
+    #         return f'{{"kind":"struct","name":"{m.name}","size":{m.size},"members":{member_str}}}'
+    raise ValueError("Unknown kind")
 
 
 def dict_to_json(top_type_name: str, d: sd.TypeDict) -> str:
@@ -195,7 +196,7 @@ def dict_to_json(top_type_name: str, d: sd.TypeDict) -> str:
     return s
 
 
-def process_top_type(original_type: DIE):
+def process_top_type(original_type: DIE) -> sd.TypeDict:
     resolved_type = resolve_typedef(original_type)
     if resolved_type.tag != DW_TAG.structure_type:
         print("top type is not a struct")
@@ -205,14 +206,14 @@ def process_top_type(original_type: DIE):
         original_type_name = Typedef(original_type).name()
     else:
         original_type_name = f"struct {struct.tag_name()}"
-    top_struct = sd.StructMeta(original_type_name, struct.byte_size(), [])
     td = sd.TypeDict()
+    top_struct = sd.StructMeta(original_type_name, struct.byte_size(), [])
     for child in resolved_type.iter_children():
         member = Member(child)
         member_type = member.type()
         register_in_typedict(member_type, td)
 
-        top_struct.variant.members.append(
+        top_struct.members.append(
             sd.Member(get_type_name(member_type), member.name(), member.member_offset())
         )
     td[original_type_name] = top_struct
@@ -221,12 +222,13 @@ def process_top_type(original_type: DIE):
     # print("In the global type dict:")
     # for key in sd.typedict:
     #     print(key, sd.typedict[key])
-    s = dict_to_json(original_type_name, td)
-    d = json.loads(s)
-    print("d=")
-    print(d)
-    print("dumps=")
-    print(json.dumps(d))
+    # s = dict_to_json(original_type_name, td)
+    # d = json.loads(s)
+    # print("d=")
+    # print(d)
+    # print("dumps=")
+    # print(json.dumps(d))
+    return td
 
 
 def main(var_name: str, file: str):
@@ -251,8 +253,9 @@ def main(var_name: str, file: str):
         t = v.attributes[DW_AT.type]
         var_type = d.get_DIE_from_refaddr(t.value)
         # process_struct(resolve_typedef(var_type), 0, "")
-        process_top_type(var_type)
+        return process_top_type(var_type)
 
 
-main("g_param", "D:/workspace/cx/learn/llvm/objdump/example.o")
+td = main("g_param", "D:/workspace/cx/learn/llvm/objdump/example.o")
 # "D:/workspace/Ecs/Ecm/Ecm.sdk/build/CcuCore0.elf"
+print(td.to_json())
