@@ -22,18 +22,14 @@ class Member:
     # TODO add consider CVR qualifiers in the type?
 
 
-@dataclass
-class StructField:
-    members: list[Member]
-
-
-class BaseTypeKind(StrEnum):
+class BaseTypeEncoding(StrEnum):
     signed_integral = auto()
-    unsigned_interal = auto()
+    unsigned_integral = auto()
     floating_point = auto()
-    pointer = auto()
-    # pointer in struct is not supported, because it's often meaning less
-    # if the pointer points to an element in the struct's array memeber, maybe use an index instead
+
+
+# pointer in struct is not supported, because it's often meaning less
+# if the pointer points to an element in the struct's array memeber, maybe use an index instead
 
 
 @dataclass
@@ -57,7 +53,7 @@ class Meta:  # inherited by each kind in Kind
 
 @dataclass
 class BaseTypeMeta(Meta):  # Meta for base type like int, not a base class
-    base_kind: BaseTypeKind
+    encoding: BaseTypeEncoding
 
 
 @dataclass

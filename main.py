@@ -8,6 +8,7 @@ from dwarf_tag import (
     BaseType,
     Member,
     EnumType,
+    PointerType,
     resolve_typedef,
     get_DW_AT_name,
     get_DW_AT_byte_size,
@@ -98,10 +99,15 @@ def get_type_name(die: DIE) -> str:
             return f"{get_DW_AT_name(arr.element_type())}[{arr.length()}]"
         case DW_TAG.structure_type:
             s = Struct(die)
-            return f"struct {s.tag_name()}"
+            tag_name = s.tag_name()
+            return "struct" if tag_name else f"struct {tag_name}"
         case DW_TAG.enumeration_type:
             e = EnumType(die)
-            return f"enum {e.tag_name()}"
+            tag_name = e.tag_name()
+            return "enum" if tag_name else f"enum {tag_name}"
+        case DW_TAG.pointer_type:
+            p = PointerType(die)
+            return f"{get_type_name(p.remove_pointer_type())}*"
         case _:
             raise ValueError(f"Unknown tag {die.tag} for name")
 
@@ -122,26 +128,55 @@ def process_struct(die: DIE, base_offset: int, prefix: str):
         process_member(child, base_offset, prefix)
 
 
-def register_with_name(die: DIE, name: str, d: sd.TypeDict) -> None:
-    if name not in d:
+def get_base_type_kind(base_type: BaseType) -> sd.BaseTypeEncoding:
+    if base_type.is_floating_point():
+        return sd.BaseTypeEncoding.floating_point
+    if base_type.is_signed_integral():
+        return sd.BaseTypeEncoding.signed_integral
+    if base_type.is_unsigned_integral():
+        return sd.BaseTypeEncoding.unsigned_integral
+    raise ValueError("base type has unknow kind")
+
+
+def register_with_name(die: DIE, name: str, td: sd.TypeDict) -> None:
+    if name not in td:
         match die.tag:
             case DW_TAG.typedef:
                 raise ValueError("typedef die should be resolved before calling")
             case DW_TAG.base_type:
-                d[name] = sd.BaseTypeMeta(
-                    name, BaseType(die).byte_size(), sd.BaseTypeKind.pointer
-                )  # TODO find out the kind
+                base_type = BaseType(die)
+                td[name] = sd.BaseTypeMeta(
+                    name, base_type.byte_size(), get_base_type_kind(base_type)
+                )
             case DW_TAG.enumeration_type:
                 e = EnumType(die)
                 underlying_type = e.underlying_type()
                 underlying_type_name = get_DW_AT_name(underlying_type)
-                d[name] = sd.EnumMeta(name, e.byte_size(), underlying_type_name)
+                td[name] = sd.EnumMeta(name, e.byte_size(), underlying_type_name)
                 # underlying_type should be registered too
-                register_with_name(underlying_type, underlying_type_name, d)
+                register_with_name(underlying_type, underlying_type_name, td)
+            case DW_TAG.structure_type:
+                s = Struct(die)
+                meta = sd.StructMeta(name, s.byte_size(), [])
+                td[name] = meta
+                # NOTE possible deep recursive
+                for m in s:
+                    member = Member(m)
+                    member_type = member.type()
+                    type_name = get_type_name(member_type)
+                    register_with_name(member_type, type_name, td)
+                    meta.members.append(
+                        sd.Member(
+                            type_name,
+                            member.name(),
+                            member.member_offset(),
+                        )
+                    )
+            case _:
+                raise NotImplementedError(f"tag {die.tag} is not supported yet")
 
-            # TODO other types like enum, struct
 
-
+# TODO remove this function
 def register_in_typedict(die: DIE, d: sd.TypeDict) -> None:
     match die.tag:
         case DW_TAG.typedef:
@@ -153,7 +188,9 @@ def register_in_typedict(die: DIE, d: sd.TypeDict) -> None:
         case DW_TAG.array_type:
             # array need not to be registered
             pass
-        case DW_TAG.structure_type:
+        case (
+            DW_TAG.structure_type
+        ):  # FIXME warning about different anonymous struct/enums (can not tell type is different based on name)
             s = Struct(die)
             name = f"struct {s.tag_name()}"
             register_with_name(die, name, d)
@@ -161,39 +198,10 @@ def register_in_typedict(die: DIE, d: sd.TypeDict) -> None:
             e = EnumType(die)
             name = f"enum {e.tag_name()}"
             register_with_name(die, name, d)
+        case DW_TAG.pointer_type:
+            pass
         case _:
-            raise ValueError(f"Unknown tag {die.tag}")
-
-
-def to_json(m: sd.Meta) -> str:
-    # consider dataclass.asdict()
-    # match m.kind:
-    #     case sd.Kind.base:
-    #         return f'{{"kind":"base","name":"{m.name}","size":{m.size}}}'
-    #     case sd.Kind.enum:
-    #         return f'{{"kind":"enum","name":"{m.name}","size":{m.size},"underlying_type":"{m.variant.underlying_type}"}}'
-    #     case sd.Kind.struct:
-    #         if len(m.variant.members) == 0:
-    #             member_str = "[]"
-    #         else:
-    #             member_str = "["
-    #             for mb in m.variant.members:
-    #                 member_str += f'{{"type":"{mb.type}","name":"{mb.name}","offset":{mb.offset}}},'
-    #             member_str = member_str[:-1]
-    #             member_str += "]"
-    #         return f'{{"kind":"struct","name":"{m.name}","size":{m.size},"members":{member_str}}}'
-    raise ValueError("Unknown kind")
-
-
-def dict_to_json(top_type_name: str, d: sd.TypeDict) -> str:
-    if len(d) == 0:
-        return "[]"
-    s = "["
-    for k in d:
-        s += to_json(d[k]) + ","
-    s = s[:-1]  # remove last ','
-    s += "]"
-    return s
+            print(f"Unknown tag {die.tag}, skipping")
 
 
 def process_top_type(original_type: DIE) -> sd.TypeDict:
@@ -208,7 +216,7 @@ def process_top_type(original_type: DIE) -> sd.TypeDict:
         original_type_name = f"struct {struct.tag_name()}"
     td = sd.TypeDict()
     top_struct = sd.StructMeta(original_type_name, struct.byte_size(), [])
-    for child in resolved_type.iter_children():
+    for child in struct:  # resolved_type.iter_children():
         member = Member(child)
         member_type = member.type()
         register_in_typedict(member_type, td)
@@ -218,16 +226,6 @@ def process_top_type(original_type: DIE) -> sd.TypeDict:
         )
     td[original_type_name] = top_struct
 
-    # sd.print_struct(top_struct)
-    # print("In the global type dict:")
-    # for key in sd.typedict:
-    #     print(key, sd.typedict[key])
-    # s = dict_to_json(original_type_name, td)
-    # d = json.loads(s)
-    # print("d=")
-    # print(d)
-    # print("dumps=")
-    # print(json.dumps(d))
     return td
 
 
@@ -257,5 +255,4 @@ def main(var_name: str, file: str):
 
 
 td = main("g_param", "D:/workspace/cx/learn/llvm/objdump/example.o")
-# "D:/workspace/Ecs/Ecm/Ecm.sdk/build/CcuCore0.elf"
 print(td.to_json())

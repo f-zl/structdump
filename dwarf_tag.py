@@ -1,5 +1,5 @@
 from elftools.dwarf.die import DIE
-from enum import StrEnum
+from enum import StrEnum, IntEnum
 
 
 class DW_AT(StrEnum):
@@ -8,6 +8,7 @@ class DW_AT(StrEnum):
     type = "DW_AT_type"
     data_member_location = "DW_AT_data_member_location"
     upper_bound = "DW_AT_upper_bound"
+    encoding = "DW_AT_encoding"
 
 
 class DW_TAG(StrEnum):
@@ -19,6 +20,23 @@ class DW_TAG(StrEnum):
     base_type = "DW_TAG_base_type"
     enumeration_type = "DW_TAG_enumeration_type"
     variable = "DW_TAG_variable"
+    pointer_type = "DW_TAG_pointer_type"
+
+
+class DW_ATE(IntEnum):
+    address = 1
+    boolean = 2
+    complex_float = 3
+    float = 4
+    signed = 5
+    signed_char = 6
+    unsigned = 7
+    unsigned_char = 8
+    imaginary_float = 9
+    packed_decimal = 10
+    numeric_string = 11
+    edited = 12
+    signed_fixed = 13
 
 
 def get_DW_AT_byte_size(die: DIE) -> int:
@@ -31,6 +49,10 @@ def get_DW_AT_name(die: DIE) -> str:
 
 def get_DW_AT_type(die: DIE) -> DIE:
     return die.dwarfinfo.get_DIE_from_refaddr(die.attributes[DW_AT.type].value)
+
+
+def get_DW_AT_encoding(die: DIE) -> DW_ATE:
+    return DW_ATE(die.attributes[DW_AT.encoding].value)
 
 
 def resolve_typedef(die: DIE) -> DIE:
@@ -72,6 +94,9 @@ class Struct:
 
     def byte_size(self) -> int:
         return get_DW_AT_byte_size(self.die)
+
+    def __iter__(self):
+        return self.die.iter_children()
 
 
 class Member:
@@ -124,6 +149,20 @@ class BaseType:
     def byte_size(self) -> int:
         return get_DW_AT_byte_size(self.die)
 
+    # type_traits
+    def is_floating_point(self) -> bool:
+        # complex_float, imaginary_float, decimal_float is ignored by now
+        return get_DW_AT_encoding(self.die) == DW_ATE.float
+
+    def is_signed_integral(self) -> bool:
+        # signed_fixed is ignored
+        e = get_DW_AT_encoding(self.die)
+        return e == DW_ATE.signed or e == DW_ATE.signed_char
+
+    def is_unsigned_integral(self) -> bool:
+        e = get_DW_AT_encoding(self.die)
+        return e == DW_ATE.unsigned or e == DW_ATE.unsigned_char
+
 
 class EnumType:
     def __init__(self, die: DIE):
@@ -140,3 +179,15 @@ class EnumType:
 
     def byte_size(self) -> int:
         return get_DW_AT_byte_size(self.die)
+
+
+class PointerType:
+    def __init__(self, die: DIE):
+        assert die.tag == DW_TAG.pointer_type
+        self.die = die
+
+    def byte_size(self) -> int:
+        return get_DW_AT_byte_size(self.die)
+
+    def remove_pointer_type(self) -> DIE:  # std::remove_pointer<T>::type
+        return get_DW_AT_type(self.die)
