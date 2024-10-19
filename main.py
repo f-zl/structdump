@@ -103,7 +103,7 @@ def get_type_name(die: DIE) -> str:
             e = EnumType(die)
             return f"enum {e.tag_name()}"
         case _:
-            return "(Unknown)"
+            raise ValueError(f"Unknown tag {die.tag} for name")
 
 
 def process_member(die: DIE, base_offset: int, prefix: str):
@@ -206,21 +206,22 @@ def process_top_type(original_type: DIE):
     else:
         original_type_name = f"struct {struct.tag_name()}"
     top_struct = sd.StructMeta(original_type_name, struct.byte_size(), [])
+    td = sd.TypeDict()
     for child in resolved_type.iter_children():
         member = Member(child)
         member_type = member.type()
-        register_in_typedict(member_type, sd.typedict)
+        register_in_typedict(member_type, td)
 
         top_struct.variant.members.append(
             sd.Member(get_type_name(member_type), member.name(), member.member_offset())
         )
-    sd.typedict[original_type_name] = top_struct
+    td[original_type_name] = top_struct
 
     # sd.print_struct(top_struct)
     # print("In the global type dict:")
     # for key in sd.typedict:
     #     print(key, sd.typedict[key])
-    s = dict_to_json(original_type_name, sd.typedict)
+    s = dict_to_json(original_type_name, td)
     d = json.loads(s)
     print("d=")
     print(d)

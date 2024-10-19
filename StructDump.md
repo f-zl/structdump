@@ -26,16 +26,15 @@ typedef struct {
 	"kind": "struct",
 	"name": "MyStruct",
 	"size": 28,
-	"member": [
+	"members": [
 		{
 			"type": "int",
 			"name": "x",
 			"offset": 0
 		},
 		{
-			"type": "float[]",
+			"type": "float[3]",
 			"name": "y",
-			"length": 3,
 			"offset": 4
 		},
 		{
@@ -69,11 +68,10 @@ typedef struct {
 	"kind": "struct",
 	"name": "ArrayInt2",
 	"size": 8,
-	"member": [
+	"members": [
 		{
-			"type": "int[]",
+			"type": "int[2]",
 			"name": "value",
-			"length": 2,
 			"offset": 0
 		}
 	]

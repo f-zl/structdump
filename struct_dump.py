@@ -1,19 +1,24 @@
-from enum import Enum, auto
+from enum import StrEnum, Enum, auto
 from dataclasses import dataclass
 
+# classes to represent the dumped result, similar to DWARF, but easier to use
 
-class Kind(Enum):
+
+class Kind(StrEnum):
     struct = "struct"
-    base = "base"
+    base = "base"  # int, float, etc
     enum = "enum"
+    array = "array"
+    atomic = "atomic"  # because _Atomic(T) is different from T
+    # union is not supported yet
 
     def __repr__(self):
-        return self.value
+        return f"Kind({self.value})"
 
 
 @dataclass
 class Member:
-    type: str  # array type is like int[3]
+    type: str  # the type in the struct declaration, array's type is like int[3]
     name: str
     offset: int
 
@@ -23,10 +28,16 @@ class StructField:
     members: list[Member]
 
 
-# type BaseField = None # py 3.12 needed
+class BaseFieldKind(Enum):
+    signed_integral = auto()
+    unsigned_interal = auto()
+    floating = auto()
+    other = auto()
+
+
 @dataclass
 class BaseField:
-    pass
+    kind: BaseFieldKind
 
 
 @dataclass
@@ -35,11 +46,21 @@ class EnumField:
 
 
 @dataclass
+class ArrayField:
+    element_type: str
+
+
+@dataclass
+class AtomicField:
+    base_type: str
+
+
+@dataclass
 class Meta:
     kind: Kind
     name: str
     size: int
-    variant: StructField | BaseField | EnumField
+    variant: StructField | BaseField | EnumField | ArrayField | AtomicField
 
     def __repr__(self):
         match self.kind:
@@ -49,6 +70,10 @@ class Meta:
                 return f"base {self.name} size {self.size}"
             case Kind.enum:
                 return f"enum {self.name} size {self.size} underlying_type {self.variant.underlying_type}"
+            case Kind.array:
+                return f"array {self.name} size {self.size} element_type {self.variant.element_type}"
+            case Kind.atomic:
+                return f"atomic {self.name} size {self.size} base_type {self.base_type}"
 
 
 def BaseMeta(name: str, size: int) -> Meta:
@@ -59,11 +84,10 @@ def StructMeta(name: str, size: int, members: list[Member]) -> Meta:
     return Meta(Kind.struct, name, size, StructField(members))
 
 
+# each executable should have one single type dict
+# it is not supported that multuple types share the same name
 class TypeDict(dict[str, Meta]):
     pass
-
-
-typedict = TypeDict()
 
 
 def print_member(m: Member):

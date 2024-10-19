@@ -53,10 +53,12 @@ class Array:
                 case DW_TAG.subrange_type:  # gcc uses this
                     return child.attributes[DW_AT.upper_bound].value + 1
                 case DW_TAG.enumeration_type:
-                    pass  # print("Array child enum not supported yet")
+                    raise NotImplementedError(
+                        "Array child has enum tag, which is not supported yet"
+                    )
                 case _:
-                    pass  # print("Not supported")
-        raise AssertionError
+                    pass
+        raise ValueError("Array children have no known tag for length")
 
 
 class Struct:
@@ -64,9 +66,9 @@ class Struct:
         assert die.tag == DW_TAG.structure_type
         self.die = die
 
-    def tag_name(self) -> str:  # maybe return str | None
+    def tag_name(self) -> str | None:
         name = self.die.attributes.get(DW_AT.name)
-        return name.value if name else "(anonymous)"
+        return name.value if name else None
 
     def byte_size(self) -> int:
         return get_DW_AT_byte_size(self.die)
@@ -86,12 +88,13 @@ class Member:
     def member_offset(self) -> int:
         # bitfield is not supported
         # member that has offset=0 may have no data_member_location
-        form = self.die.attributes[DW_AT.data_member_location].value
-        if type(form) == int:
-            return form
+        data_member_location = self.die.attributes.get(DW_AT.data_member_location)
+        if data_member_location and type(data_member_location.value) == int:
+            return data_member_location.value
         # form may be a location description
-        print("TODO member offset")
-        return -1
+        raise NotImplementedError(
+            "member offset other than data_member_location is not supported yet"
+        )
 
 
 class Typedef:
@@ -127,9 +130,9 @@ class EnumType:
         assert die.tag == DW_TAG.enumeration_type
         self.die = die
 
-    def tag_name(self) -> str:
+    def tag_name(self) -> str | None:
         name = self.die.attributes.get(DW_AT.name)
-        return name.value if name else "(anonymous)"
+        return name.value if name else None
 
     # may be invalid
     def underlying_type(self) -> DIE:
