@@ -64,6 +64,43 @@ def resolve_typedef(die: DIE) -> DIE:
     return die
 
 
+def get_type_size(die: DIE) -> int:
+    match die.tag:
+        case DW_TAG.base_type | DW_TAG.enumeration_type | DW_TAG.structure_type:
+            return get_DW_AT_byte_size(die)
+        case DW_TAG.typedef:
+            return get_type_size(resolve_typedef(die))
+        case DW_TAG.array_type:
+            arr = Array(die)
+            return get_type_size(resolve_typedef(arr.element_type())) * arr.length()
+        case _:
+            raise NotImplementedError(f"Unknown tag {die.tag}")
+
+
+def get_type_name(die: DIE) -> str:
+    match die.tag:
+        case DW_TAG.typedef:
+            return Typedef(die).name()
+        case DW_TAG.base_type:
+            return BaseType(die).name()
+        case DW_TAG.array_type:
+            a = Array(die)
+            return f"{get_DW_AT_name(a.element_type())}[{a.length()}]"
+        case DW_TAG.structure_type:
+            s = Struct(die)
+            tag_name = s.tag_name()
+            return "struct (anonymous)" if tag_name else f"struct {tag_name}"
+        case DW_TAG.enumeration_type:
+            e = EnumType(die)
+            tag_name = e.tag_name()
+            return "enum" if tag_name else f"enum {tag_name}"
+        case DW_TAG.pointer_type:
+            p = PointerType(die)
+            return f"{get_type_name(p.remove_pointer_type())}*"
+        case _:
+            raise NotImplementedError(f"Unknown tag {die.tag} for name")
+
+
 class Array:
     def __init__(self, die: DIE):
         assert die.tag == DW_TAG.array_type
@@ -150,6 +187,9 @@ class Member:
                 f"Not implemented, data_member_location={data_member_location}"
             )
             return None
+
+    def byte_size(self) -> int:
+        return get_type_size(self.type())
 
 
 class Typedef:

@@ -19,7 +19,7 @@ class MemberMeta:
     type: str  # the type in the struct declaration, array's type is like int[3]
     name: str
     offset: int | None
-    # size: str
+    size: int  # maybe None
     # TODO add consider CVR qualifiers in the type?
 
 

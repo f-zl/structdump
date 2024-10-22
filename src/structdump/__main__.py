@@ -3,14 +3,14 @@ from elftools.dwarf.die import DIE
 from .dwarf import (
     Array,
     Struct,
-    Typedef,
     BaseType,
     Member,
     EnumType,
-    PointerType,
     resolve_typedef,
     get_DW_AT_name,
     get_DW_AT_byte_size,
+    get_type_size,
+    get_type_name,
     DW_AT,
     DW_TAG,
 )
@@ -68,19 +68,6 @@ def member_offset_str(base_offset: int, member_offset: int | None) -> str:
     return f"{offset}({base_offset}+{member_offset})"
 
 
-def get_type_size(die: DIE) -> int:
-    match die.tag:
-        case DW_TAG.base_type | DW_TAG.enumeration_type | DW_TAG.structure_type:
-            return get_DW_AT_byte_size(die)
-        case DW_TAG.typedef:
-            return get_type_size(resolve_typedef(die))
-        case DW_TAG.array_type:
-            arr = Array(die)
-            return get_type_size(resolve_typedef(arr.element_type())) * arr.length()
-        case _:
-            raise AssertionError(f"Unknown tag {die.tag}")
-
-
 def member_type_size_str(die: DIE) -> str:
     match die.tag:
         case DW_TAG.base_type | DW_TAG.enumeration_type | DW_TAG.structure_type:
@@ -94,30 +81,6 @@ def member_type_size_str(die: DIE) -> str:
             return f"{elem_size * arr_len}({elem_size}*{arr_len})"
         case _:
             return f"Unknown tag {die.tag}"
-
-
-def get_type_name(die: DIE) -> str:
-    match die.tag:
-        case DW_TAG.typedef:
-            return Typedef(die).name()
-        case DW_TAG.base_type:
-            return BaseType(die).name()
-        case DW_TAG.array_type:
-            a = Array(die)
-            return f"{get_DW_AT_name(a.element_type())}[{a.length()}]"
-        case DW_TAG.structure_type:
-            s = Struct(die)
-            tag_name = s.tag_name()
-            return "struct (anonymous)" if tag_name else f"struct {tag_name}"
-        case DW_TAG.enumeration_type:
-            e = EnumType(die)
-            tag_name = e.tag_name()
-            return "enum" if tag_name else f"enum {tag_name}"
-        case DW_TAG.pointer_type:
-            p = PointerType(die)
-            return f"{get_type_name(p.remove_pointer_type())}*"
-        case _:
-            raise ValueError(f"Unknown tag {die.tag} for name")
 
 
 def get_base_type_kind(base_type: BaseType) -> BaseTypeEncoding:
@@ -168,6 +131,7 @@ def register_with_name(die: DIE, name: str, td: TypeDict) -> None:
                             type_name,
                             member.name(),
                             member.member_offset(),
+                            member.byte_size(),
                         )
                     )
                     register_with_name(member_type, type_name, td)
@@ -198,7 +162,12 @@ def process_top_type(original_type: DIE) -> TypeDict:
         register_with_name(member_type, member_type_name, td)
 
         top_struct.members.append(
-            MemberMeta(member_type_name, member.name(), member.member_offset())
+            MemberMeta(
+                member_type_name,
+                member.name(),
+                member.member_offset(),
+                member.byte_size(),
+            )
         )
     td[original_type_name] = top_struct
     return td
