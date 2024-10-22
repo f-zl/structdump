@@ -1,5 +1,5 @@
 from elftools.dwarf.die import DIE
-from elftools.construct.lib import ListContainer
+from elftools.dwarf.dwarf_expr import DWARFExprParser
 from enum import StrEnum, IntEnum
 import logging
 
@@ -102,8 +102,15 @@ class Struct:
         return self.die.iter_children()
 
 
-from elftools.common.construct_utils import ULEB128
-from io import BytesIO
+_parser: DWARFExprParser | None = None
+
+
+def dwarf_expr_parser(die: DIE) -> DWARFExprParser:
+    # DWARFExprParser is stateless so it can be reused
+    global _parser
+    if _parser is None:
+        _parser = DWARFExprParser(die.cu.structs)
+    return _parser
 
 
 class Member:
@@ -118,28 +125,31 @@ class Member:
         return get_DW_AT_type(self.die)
 
     def member_offset(self) -> int | None:
-        # bitfield is not supported
-        # member that has offset=0 may have no data_member_location
         data_member_location = self.die.attributes.get(DW_AT.data_member_location)
-        if data_member_location is not None:
-            value = data_member_location.value
-            if type(value) == int:
-                # elf produced by linux-x64-gcc falls in this
-                return value
-            # pyelftools shows the value is DW_FORM_block1 and is a ListContainer
-            # for the elf of interest, it only uses DW_OP_plus_uconst, so just implement that
-            if type(value) == ListContainer:
-                DW_OP_plus_uconst = 35
-                if len(value) < 2 or value[0] != DW_OP_plus_uconst:
-                    logging.warning(f"Not implemented, value={value}")
-                    return None
-                b = BytesIO(bytes(value[1:]))
-                offset = ULEB128("")._parse(b, None)
-                return offset
-        logging.warning(
-            f"member offset other than data_member_location is not supported {self.die}"
-        )
-        return None
+        if data_member_location is None:
+            # bit-fields may have no data_member_location
+            return None
+        value = data_member_location.value
+        if type(value) == int:
+            # elf produced by linux-x64-gcc falls in this
+            return value
+        if data_member_location.form.startswith("DW_FORM_block"):
+            # the value is an DWARF expression
+            parser = dwarf_expr_parser(self.die)
+            expr = parser.parse_expr(value)
+            if len(expr) == 1 and expr[0].op_name == "DW_OP_plus_uconst":
+                # for the elf of interest, it only uses DW_OP_plus_uconst, so just implement that by now
+                return expr[0].args[0]
+            else:
+                logging.warning(
+                    f"Not implemented, data_member_location={data_member_location}"
+                )
+                return None
+        else:
+            logging.warning(
+                f"Not implemented, data_member_location={data_member_location}"
+            )
+            return None
 
 
 class Typedef:
