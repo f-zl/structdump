@@ -1,5 +1,7 @@
 from elftools.dwarf.die import DIE
+from elftools.construct.lib import ListContainer
 from enum import StrEnum, IntEnum
+import logging
 
 
 class DW_AT(StrEnum):
@@ -48,7 +50,8 @@ def get_DW_AT_name(die: DIE) -> str:
 
 
 def get_DW_AT_type(die: DIE) -> DIE:
-    return die.dwarfinfo.get_DIE_from_refaddr(die.attributes[DW_AT.type].value)
+    # https://github.com/eliben/pyelftools/issues/381
+    return die.get_DIE_from_attribute(DW_AT.type)
 
 
 def get_DW_AT_encoding(die: DIE) -> DW_ATE:
@@ -99,27 +102,44 @@ class Struct:
         return self.die.iter_children()
 
 
+from elftools.common.construct_utils import ULEB128
+from io import BytesIO
+
+
 class Member:
     def __init__(self, die: DIE):
         assert die.tag == DW_TAG.member
         self.die = die
 
-    def name(self) -> str:
+    def name(self) -> str:  # TODO maybe unnamed
         return get_DW_AT_name(self.die)
 
     def type(self) -> DIE:
         return get_DW_AT_type(self.die)
 
-    def member_offset(self) -> int:
+    def member_offset(self) -> int | None:
         # bitfield is not supported
         # member that has offset=0 may have no data_member_location
         data_member_location = self.die.attributes.get(DW_AT.data_member_location)
-        if data_member_location and type(data_member_location.value) == int:
-            return data_member_location.value
-        # form may be a location description
-        raise NotImplementedError(
-            "member offset other than data_member_location is not supported yet"
+        if data_member_location is not None:
+            value = data_member_location.value
+            if type(value) == int:
+                # elf produced by linux-x64-gcc falls in this
+                return value
+            # pyelftools shows the value is DW_FORM_block1 and is a ListContainer
+            # for the elf of interest, it only uses DW_OP_plus_uconst, so just implement that
+            if type(value) == ListContainer:
+                DW_OP_plus_uconst = 35
+                if len(value) < 2 or value[0] != DW_OP_plus_uconst:
+                    logging.warning(f"Not implemented, value={value}")
+                    return None
+                b = BytesIO(bytes(value[1:]))
+                offset = ULEB128("")._parse(b, None)
+                return offset
+        logging.warning(
+            f"member offset other than data_member_location is not supported {self.die}"
         )
+        return None
 
 
 class Typedef:
@@ -174,8 +194,12 @@ class EnumType:
         return name.value if name else None
 
     # may be invalid
-    def underlying_type(self) -> DIE:
-        return get_DW_AT_type(self.die)
+    def underlying_type(self) -> DIE | None:
+        # for some reasons some enum doesn't underlying_type in debug info
+        try:
+            return get_DW_AT_type(self.die)
+        except KeyError:
+            return None
 
     def byte_size(self) -> int:
         return get_DW_AT_byte_size(self.die)

@@ -3,20 +3,19 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "struct-dump"
+name = "structdump"
 version = "0.1.0"
 dependencies = [
   "pyelftools >= 0.31",
 ]
 requires-python = ">=3.10"
 authors = [
-  {name = "fzl", email = "fzeli@163.com"},
+  { name = "fzl", email = "fzeli@163.com" },
 ]
 description = "A tool to dump C struct in object or executable files. The dump result includes each member's type, name, offset, size"
 readme = "README.md"
 keywords = ["struct", "C", "dump"]
 classifiers = [
-  "Development Status :: 4 - Beta",
   "Programming Language :: Python",
-  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "License :: OSI Approved :: MIT License",
 ]

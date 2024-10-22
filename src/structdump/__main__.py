@@ -1,7 +1,6 @@
 from elftools.elf.elffile import ELFFile
 from elftools.dwarf.die import DIE
-from elftools.dwarf.dwarfinfo import DWARFInfo
-from dwarf_tag import (
+from .dwarf_tag import (
     Array,
     Struct,
     Typedef,
@@ -15,7 +14,14 @@ from dwarf_tag import (
     DW_AT,
     DW_TAG,
 )
-import struct_dump as sd
+from .structdump import (
+    TypeDict,
+    BaseTypeEncoding,
+    BaseTypeMeta,
+    StructMeta,
+    EnumMeta,
+    MemberMeta,
+)
 import sys
 
 
@@ -35,10 +41,10 @@ def find_sym_addr_size(elffile: ELFFile, symbol_name: str) -> tuple[int, int] | 
 
 
 def find_variable(die: DIE, var_name: str):
-    if die.tag == DW_TAG.variable and die.attributes[DW_AT.name].value == bytes(
-        var_name, "ascii"
-    ):
-        return die
+    if die.tag == DW_TAG.variable:
+        name = die.attributes.get(DW_AT.name)
+        if name is not None and name.value == bytes(var_name, "ascii"):
+            return die
     for c in die.iter_children():
         if find_variable(c, var_name):
             return c
@@ -52,7 +58,9 @@ def print_prefix(prefix: str, member: Member):
         print(member.name(), end="")
 
 
-def member_offset_str(base_offset: int, member_offset: int) -> str:
+def member_offset_str(base_offset: int, member_offset: int | None) -> str:
+    if member_offset is None:
+        return "unknown"  # or no offset
     if base_offset == 0:
         return str(member_offset)
     offset = base_offset + member_offset
@@ -128,36 +136,40 @@ def process_struct(die: DIE, base_offset: int, prefix: str):
         process_member(child, base_offset, prefix)
 
 
-def get_base_type_kind(base_type: BaseType) -> sd.BaseTypeEncoding:
+def get_base_type_kind(base_type: BaseType) -> BaseTypeEncoding:
     if base_type.is_floating_point():
-        return sd.BaseTypeEncoding.floating_point
+        return BaseTypeEncoding.floating_point
     if base_type.is_signed_integral():
-        return sd.BaseTypeEncoding.signed_integral
+        return BaseTypeEncoding.signed_integral
     if base_type.is_unsigned_integral():
-        return sd.BaseTypeEncoding.unsigned_integral
+        return BaseTypeEncoding.unsigned_integral
     raise ValueError("base type has unknow kind")
 
 
-def register_with_name(die: DIE, name: str, td: sd.TypeDict) -> None:
+def register_with_name(die: DIE, name: str, td: TypeDict) -> None:
     if name not in td:
         match die.tag:
             case DW_TAG.typedef:
-                raise ValueError("typedef die should be resolved before calling")
+                # raise ValueError("typedef die should be resolved before calling")
+                register_with_name(resolve_typedef(die), name, td)
             case DW_TAG.base_type:
                 base_type = BaseType(die)
-                td[name] = sd.BaseTypeMeta(
+                td[name] = BaseTypeMeta(
                     name, base_type.byte_size(), get_base_type_kind(base_type)
                 )
             case DW_TAG.enumeration_type:
                 e = EnumType(die)
                 underlying_type = e.underlying_type()
-                underlying_type_name = get_DW_AT_name(underlying_type)
-                td[name] = sd.EnumMeta(name, e.byte_size(), underlying_type_name)
-                # underlying_type should be registered too
-                register_with_name(underlying_type, underlying_type_name, td)
+                if underlying_type is None:
+                    td[name] = EnumMeta(name, e.byte_size(), None)
+                else:
+                    underlying_type_name = get_DW_AT_name(underlying_type)
+                    td[name] = EnumMeta(name, e.byte_size(), underlying_type_name)
+                    # underlying_type should be registered too
+                    register_with_name(underlying_type, underlying_type_name, td)
             case DW_TAG.structure_type:
                 s = Struct(die)
-                meta = sd.StructMeta(name, s.byte_size(), [])
+                meta = StructMeta(name, s.byte_size(), [])
                 td[name] = meta
                 # NOTE possible deep recursive
                 for m in s:
@@ -166,18 +178,22 @@ def register_with_name(die: DIE, name: str, td: sd.TypeDict) -> None:
                     type_name = get_type_name(member_type)
                     register_with_name(member_type, type_name, td)
                     meta.members.append(
-                        sd.Member(
+                        MemberMeta(
                             type_name,
                             member.name(),
                             member.member_offset(),
                         )
                     )
+            case DW_TAG.array_type:
+                # array do not need to be registered
+                # NOTE maybe typedef will resolve to an array type
+                pass
             case _:
                 raise NotImplementedError(f"tag {die.tag} is not supported yet")
 
 
 # TODO remove this function
-def register_in_typedict(die: DIE, d: sd.TypeDict) -> None:
+def register_in_typedict(die: DIE, d: TypeDict) -> None:
     match die.tag:
         case DW_TAG.typedef:
             name = Typedef(die).name()
@@ -204,28 +220,49 @@ def register_in_typedict(die: DIE, d: sd.TypeDict) -> None:
             print(f"Unknown tag {die.tag}, skipping")
 
 
-def process_top_type(original_type: DIE) -> sd.TypeDict:
+# g_var = None
+
+
+def process_top_type(original_type: DIE) -> TypeDict:
+    # breakpoint()
     resolved_type = resolve_typedef(original_type)
+    # print(original_type)
+    # i = 0
+    # while i < 5000:
+    #     try:
+    #         d = original_type.dwarfinfo.get_DIE_from_refaddr(i)
+    #         if d.tag == DW_TAG.structure_type:
+    #             print(f"i={i},{i:#x}, d={d}")
+    #             # break
+    #     except:
+    #         pass
+    #     i += 1
+    # sys.exit(1)
+    # global g_var  # i=1223(0x4c7), 1287(0x507), 1305(0x519)
+    # g_var = d
+    # print("original_type", original_type)
+    # print("resolved_type", resolved_type)
     if resolved_type.tag != DW_TAG.structure_type:
         print("top type is not a struct")
-        return
+        sys.exit(1)
     struct = Struct(resolved_type)
     if original_type.tag == DW_TAG.typedef:
         original_type_name = Typedef(original_type).name()
     else:
         original_type_name = f"struct {struct.tag_name()}"
-    td = sd.TypeDict()
-    top_struct = sd.StructMeta(original_type_name, struct.byte_size(), [])
+    td = TypeDict()
+    top_struct = StructMeta(original_type_name, struct.byte_size(), [])
     for child in struct:  # resolved_type.iter_children():
         member = Member(child)
         member_type = member.type()
         register_in_typedict(member_type, td)
 
         top_struct.members.append(
-            sd.Member(get_type_name(member_type), member.name(), member.member_offset())
+            MemberMeta(
+                get_type_name(member_type), member.name(), member.member_offset()
+            )
         )
     td[original_type_name] = top_struct
-
     return td
 
 
@@ -237,22 +274,30 @@ def main(var_name: str, file: str):
             print("Not find variable in .symtab")
             sys.exit(1)
         addr, size = rst
-        print(f"{var_name} is at addr {addr}, has size {size}")
+        print(f"{var_name} is at addr {addr:#x}, has size {size}")
         if not e.has_dwarf_info():
             print("No DWARF info")
             sys.exit(1)
         d = e.get_dwarf_info()
-        for CU in d.iter_CUs():
-            die = CU.get_top_DIE()
-            v = find_variable(die, var_name)
-        if v is None:
-            print("Not find variable in dwarf")
+        for cu in d.iter_CUs():
+            die = cu.get_top_DIE()
+            var = find_variable(die, var_name)
+            if var is not None:
+                break
+        if var is None:
+            print(f"Variable {var_name} not found")
             sys.exit(1)
-        t = v.attributes[DW_AT.type]
-        var_type = d.get_DIE_from_refaddr(t.value)
+        var_type = var.get_DIE_from_attribute(DW_AT.type)
         # process_struct(resolve_typedef(var_type), 0, "")
         return process_top_type(var_type)
 
 
-td = main("g_param", "D:/workspace/cx/learn/llvm/objdump/example.o")
-print(td.to_json())
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--file", help="object or execuable file", required=True)
+    parser.add_argument("--variable", help="the struct object's name", required=True)
+    args = parser.parse_args()
+    td = main(args.variable, args.file)
+    print(td.to_json())

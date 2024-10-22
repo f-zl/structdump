@@ -15,10 +15,10 @@ class Kind(StrEnum):
 
 
 @dataclass
-class Member:
+class MemberMeta:
     type: str  # the type in the struct declaration, array's type is like int[3]
     name: str
-    offset: int
+    offset: int | None
     # TODO add consider CVR qualifiers in the type?
 
 
@@ -30,16 +30,6 @@ class BaseTypeEncoding(StrEnum):
 
 # pointer in struct is not supported, because it's often meaning less
 # if the pointer points to an element in the struct's array memeber, maybe use an index instead
-
-
-@dataclass
-class ArrayField:
-    element_type: str
-
-
-@dataclass
-class AtomicField:
-    base_type: str
 
 
 @dataclass
@@ -58,12 +48,12 @@ class BaseTypeMeta(Meta):  # Meta for base type like int, not a base class
 
 @dataclass
 class StructMeta(Meta):
-    members: list[Member]
+    members: list[MemberMeta]
 
 
 @dataclass
 class EnumMeta(Meta):
-    underlying_type: str
+    underlying_type: str | None  # some compiler doesn't provide an underlying type
 
 
 class JSONEncoder(json.JSONEncoder):
@@ -80,30 +70,3 @@ class JSONEncoder(json.JSONEncoder):
 class TypeDict(dict[str, Meta]):
     def to_json(self):
         return json.dumps(self, cls=JSONEncoder)
-
-
-def print_member(m: Member):
-    print(f"{m.type} {m.name} offset {m.offset}")
-
-
-def print_struct(s: StructMeta):
-    print(f"{s.name} size {s.size} members {{")
-    for m in s.members:
-        print_member(m)
-    print("}")
-
-
-MyStruct = StructMeta(
-    "MyStruct",
-    28,
-    [
-        Member("int", "x", 0),
-        Member("float[2]", "y", 4),
-        Member("char", "c", 16),
-        Member("ArrayInt2", "arr", 20),
-    ],
-)
-# print_struct(MyStruct)
-# d = asdict(MyStruct)
-# s = json.dumps(d, cls=JSONEncoder)
-# print(s)
