@@ -1,5 +1,5 @@
 from enum import StrEnum, auto
-from dataclasses import dataclass, asdict, is_dataclass
+from dataclasses import dataclass, asdict, is_dataclass, field
 import json
 
 # classes to represent the dumped result, similar to DWARF, but easier to use
@@ -9,7 +9,7 @@ class Kind(StrEnum):
     struct = auto()
     base = auto()  # int, float, pointer
     enum = auto()
-    array = auto()
+    array = auto()  # array will not be registered in the type dict though
     atomic = auto()  # because _Atomic(T) is different from T
     # union is not supported yet
 
@@ -19,6 +19,7 @@ class MemberMeta:
     type: str  # the type in the struct declaration, array's type is like int[3]
     name: str
     offset: int | None
+    # size: str
     # TODO add consider CVR qualifiers in the type?
 
 
@@ -34,6 +35,7 @@ class BaseTypeEncoding(StrEnum):
 
 @dataclass
 class Meta:  # inherited by each kind in Kind
+    kind: Kind  # so that the output will contain "kind" field
     name: str
     size: int
 
@@ -43,16 +45,19 @@ class Meta:  # inherited by each kind in Kind
 
 @dataclass
 class BaseTypeMeta(Meta):  # Meta for base type like int, not a base class
+    kind: Kind = field(init=False, default=Kind.base)
     encoding: BaseTypeEncoding
 
 
 @dataclass
 class StructMeta(Meta):
+    kind: Kind = field(init=False, default=Kind.struct)
     members: list[MemberMeta]
 
 
 @dataclass
 class EnumMeta(Meta):
+    kind: Kind = field(init=False, default=Kind.enum)
     underlying_type: str | None  # some compiler doesn't provide an underlying type
 
 
