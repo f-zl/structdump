@@ -19,7 +19,9 @@ gcc -g -c a.c # build the elf a.o with debugging information
 # dump the struct variable as json to stdout in cmd line
 python -m structdump --file a.o --variable g_var
 ```
+
 Output the following json (formatted by VSCode):
+
 ```json
 {
 	"char": {
@@ -61,8 +63,9 @@ Output the following json (formatted by VSCode):
 import structdump as sd
 file = "a.o"
 variable = "g_var"
-td = sd.get_type_dict(file, variable)
+typename, td = sd.get_type_dict(file, variable)
 # td contains type information about the C struct and the types the struct members depend on
+print(f"{variable} has type {typename}")
 print(td.to_json())
 ```
 
@@ -73,3 +76,9 @@ git clone <this_repo>
 pip install ./structdump
 ```
 
+## TODO
+
+add examples
+
+- read variables from .data, .rodata
+- generate functions to deserialize a struct

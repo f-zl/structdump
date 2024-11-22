@@ -11,6 +11,7 @@ class DW_AT(StrEnum):
     data_member_location = "DW_AT_data_member_location"
     upper_bound = "DW_AT_upper_bound"
     encoding = "DW_AT_encoding"
+    location = "DW_AT_location"
 
 
 class DW_TAG(StrEnum):
@@ -23,6 +24,8 @@ class DW_TAG(StrEnum):
     enumeration_type = "DW_TAG_enumeration_type"
     variable = "DW_TAG_variable"
     pointer_type = "DW_TAG_pointer_type"
+    union_type = "DW_TAG_union_type"
+    volatile_type = "DW_TAG_volatile_type"
 
 
 class DW_ATE(IntEnum):
@@ -45,8 +48,11 @@ def get_DW_AT_byte_size(die: DIE) -> int:
     return die.attributes[DW_AT.byte_size].value
 
 
-def get_DW_AT_name(die: DIE) -> str:
-    return str(die.attributes[DW_AT.name].value, "ascii")
+def get_DW_AT_name(die: DIE) -> str | None:
+    name = die.attributes.get(DW_AT.name)
+    if name is None:
+        return None
+    return str(name.value, "ascii")
 
 
 def get_DW_AT_type(die: DIE) -> DIE:
@@ -73,6 +79,8 @@ def get_type_size(die: DIE) -> int:
         case DW_TAG.array_type:
             arr = Array(die)
             return get_type_size(resolve_typedef(arr.element_type())) * arr.length()
+        case DW_TAG.union_type | DW_TAG.volatile_type:
+            return -1  # TODO
         case _:
             raise NotImplementedError(f"Unknown tag {die.tag}")
 
@@ -97,6 +105,10 @@ def get_type_name(die: DIE) -> str:
         case DW_TAG.pointer_type:
             p = PointerType(die)
             return f"{get_type_name(p.remove_pointer_type())}*"
+        case DW_TAG.union_type:
+            return "union (not fully supported)"
+        case DW_TAG.volatile_type:
+            return "volatile (not fully supported)"
         case _:
             raise NotImplementedError(f"Unknown tag {die.tag} for name")
 
@@ -155,7 +167,7 @@ class Member:
         assert die.tag == DW_TAG.member
         self.die = die
 
-    def name(self) -> str:  # TODO maybe unnamed
+    def name(self) -> str | None:  # if unnamed, return None
         return get_DW_AT_name(self.die)
 
     def type(self) -> DIE:
@@ -232,6 +244,10 @@ class BaseType:
     def is_unsigned_integral(self) -> bool:
         e = get_DW_AT_encoding(self.die)
         return e == DW_ATE.unsigned or e == DW_ATE.unsigned_char
+
+    def is_boolean(self) -> bool:
+        e = get_DW_AT_encoding(self.die)
+        return e == DW_ATE.boolean
 
 
 class EnumType:

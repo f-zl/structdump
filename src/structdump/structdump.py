@@ -27,6 +27,7 @@ class BaseTypeEncoding(StrEnum):
     signed_integral = auto()
     unsigned_integral = auto()
     floating_point = auto()
+    boolean = auto()
 
 
 # pointer in struct is not supported, because it's often meaning less

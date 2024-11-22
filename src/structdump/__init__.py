@@ -11,6 +11,7 @@ from .dwarf import (
     get_DW_AT_byte_size,
     get_type_size,
     get_type_name,
+    get_DW_AT_type,
     DW_AT,
     DW_TAG,
 )
@@ -40,15 +41,21 @@ def find_sym_addr_size(elffile: ELFFile, symbol_name: str) -> tuple[int, int] | 
         return None
 
 
-def find_variable(die: DIE, var_name: str):
+# this function is recursive so the name should be converted to bytes at call site
+def _find_variable(die: DIE, var_name_bytes: bytes) -> DIE | None:
     if die.tag == DW_TAG.variable:
         name = die.attributes.get(DW_AT.name)
-        if name is not None and name.value == bytes(var_name, "ascii"):
+        if name is not None and name.value == var_name_bytes:
             return die
     for c in die.iter_children():
-        if find_variable(c, var_name):
-            return c
+        d = _find_variable(c, var_name_bytes)
+        if d is not None:
+            return d
     return None
+
+
+def find_variable(die: DIE, var_name: str):
+    return _find_variable(die, bytes(var_name, "ascii"))
 
 
 def print_prefix(prefix: str, member: Member):
@@ -89,7 +96,9 @@ def get_base_type_kind(base_type: BaseType) -> BaseTypeEncoding:
         return BaseTypeEncoding.signed_integral
     if base_type.is_unsigned_integral():
         return BaseTypeEncoding.unsigned_integral
-    raise ValueError("base type has unknow kind")
+    if base_type.is_boolean():
+        return BaseTypeEncoding.boolean
+    raise ValueError("base type has unknown kind")
 
 
 def register_with_name(die: DIE, name: str, td: TypeDict) -> None:
@@ -141,11 +150,15 @@ def register_with_name(die: DIE, name: str, td: TypeDict) -> None:
                 a = Array(die)
                 element_type = a.element_type()
                 register_with_name(element_type, get_type_name(element_type), td)
+            case DW_TAG.union_type | DW_TAG.volatile_type:
+                logging.warning(f"tag {die.tag} is not fully supported")
+                return
             case _:
                 raise NotImplementedError(f"tag {die.tag} is not supported yet")
 
 
-def process_top_type(original_type: DIE) -> TypeDict:
+# return top type name and and the type dict
+def process_top_type(original_type: DIE) -> tuple[str, TypeDict]:
     resolved_type = resolve_typedef(original_type)
     if resolved_type.tag != DW_TAG.structure_type:
         raise ValueError("Top type is not a struct")
@@ -168,10 +181,11 @@ def process_top_type(original_type: DIE) -> TypeDict:
             )
         )
     td[original_type_name] = top_struct
-    return td
+    return original_type_name, td
 
 
-def get_type_dict(filename: str, var_name: str) -> TypeDict:
+# return variable's type name and and the type dict
+def get_type_dict(filename: str, var_name: str) -> tuple[str, TypeDict]:
     with open(filename, "rb") as file:
         elf = ELFFile(file)  # need to keep file open when elf is being used
         rst = find_sym_addr_size(elf, var_name)
@@ -189,5 +203,5 @@ def get_type_dict(filename: str, var_name: str) -> TypeDict:
                 break
         if var is None:
             raise ValueError(f"Variable {var_name} not found in .debug_info")
-        var_type = var.get_DIE_from_attribute(DW_AT.type)
+        var_type = get_DW_AT_type(var)
         return process_top_type(var_type)
