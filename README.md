@@ -80,5 +80,10 @@ pip install ./structdump
 
 add examples
 
-- read variables from .data, .rodata
-- generate functions to deserialize a struct
+- read variable's initial value from elf
+- generate functions to serialize/deserialize a struct
+- accept non-struct variables
+- accept multiple variables
+- accept non-variable symbol, like type names
+- correctly handle union, atomic types
+- build type dict dynamically

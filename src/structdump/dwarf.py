@@ -12,6 +12,7 @@ class DW_AT(StrEnum):
     upper_bound = "DW_AT_upper_bound"
     encoding = "DW_AT_encoding"
     location = "DW_AT_location"
+    const_value = "DW_AT_const_value"
 
 
 class DW_TAG(StrEnum):
@@ -58,6 +59,11 @@ def get_DW_AT_name(die: DIE) -> str | None:
 def get_DW_AT_type(die: DIE) -> DIE:
     # https://github.com/eliben/pyelftools/issues/381
     return die.get_DIE_from_attribute(DW_AT.type)
+
+
+def get_DW_AT_const_value(die: DIE):
+    value = die.attributes.get(DW_AT.const_value)
+    return value.value
 
 
 def get_DW_AT_encoding(die: DIE) -> DW_ATE:
@@ -269,6 +275,12 @@ class EnumType:
 
     def byte_size(self) -> int:
         return get_DW_AT_byte_size(self.die)
+
+    def enumerators(self) -> dict[str, int]:  # dict or tuple of (str, int)?
+        d = dict()
+        for child in self.die.iter_children():
+            d[get_DW_AT_name(child)] = get_DW_AT_const_value(child)
+        return d
 
 
 class PointerType:

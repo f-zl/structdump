@@ -22,6 +22,7 @@ from .structdump import (
     StructMeta,
     EnumMeta,
     MemberMeta,
+    Meta,  # for export
 )
 import logging
 
@@ -43,6 +44,7 @@ def find_sym_addr_size(elffile: ELFFile, symbol_name: str) -> tuple[int, int] | 
 
 # this function is recursive so the name should be converted to bytes at call site
 def _find_variable(die: DIE, var_name_bytes: bytes) -> DIE | None:
+    # TODO poor performance when finding in a large elf, improve
     if die.tag == DW_TAG.variable:
         name = die.attributes.get(DW_AT.name)
         if name is not None and name.value == var_name_bytes:
@@ -118,14 +120,19 @@ def register_with_name(die: DIE, name: str, td: TypeDict) -> None:
                 )
             case DW_TAG.enumeration_type:
                 e = EnumType(die)
+                # TODO TI ccs compiler generates no underlying_type, only byte_size
                 underlying_type = e.underlying_type()
                 if underlying_type is None:
-                    td[name] = EnumMeta(name, e.byte_size(), None)
+                    td[name] = EnumMeta(name, e.byte_size(), None, e.enumerators())
                 else:
                     # underlying_type should be registered too
                     underlying_type_name = get_DW_AT_name(underlying_type)
+                    if underlying_type_name is None:
+                        raise ValueError(f"Cannot find type {underlying_type_name}")
                     register_with_name(underlying_type, underlying_type_name, td)
-                    td[name] = EnumMeta(name, e.byte_size(), underlying_type_name)
+                    td[name] = EnumMeta(
+                        name, e.byte_size(), underlying_type_name, e.enumerators()
+                    )
             case DW_TAG.structure_type:
                 s = Struct(die)
                 meta = StructMeta(name, s.byte_size(), [])
@@ -184,8 +191,8 @@ def process_top_type(original_type: DIE) -> tuple[str, TypeDict]:
     return original_type_name, td
 
 
-# return variable's type name and and the type dict
-def get_type_dict(filename: str, var_name: str) -> tuple[str, TypeDict]:
+# return variable's type name, type dict, and is_little_endian
+def get_type_dict(filename: str, var_name: str) -> tuple[str, TypeDict, bool]:
     with open(filename, "rb") as file:
         elf = ELFFile(file)  # need to keep file open when elf is being used
         rst = find_sym_addr_size(elf, var_name)
@@ -196,6 +203,7 @@ def get_type_dict(filename: str, var_name: str) -> tuple[str, TypeDict]:
         if not elf.has_dwarf_info():
             raise ValueError("No DWARF info")
         d = elf.get_dwarf_info()
+        var = None
         for cu in d.iter_CUs():
             die = cu.get_top_DIE()
             var = find_variable(die, var_name)
@@ -204,4 +212,4 @@ def get_type_dict(filename: str, var_name: str) -> tuple[str, TypeDict]:
         if var is None:
             raise ValueError(f"Variable {var_name} not found in .debug_info")
         var_type = get_DW_AT_type(var)
-        return process_top_type(var_type)
+        return *process_top_type(var_type), elf.little_endian

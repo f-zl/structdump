@@ -4,14 +4,20 @@ import json
 
 # classes to represent the dumped result, similar to DWARF, but easier to use
 
+# TODO add CVR qualifiers in the type?
+
 
 class Kind(StrEnum):
-    struct = auto()
-    base = auto()  # int, float, pointer
+    # int (including char, bool, _BitInt), float (including complex, decimal)
+    base = auto()
     enum = auto()
     array = auto()  # array will not be registered in the type dict though
+    struct = auto()
     atomic = auto()  # because _Atomic(T) is different from T
-    # union is not supported yet
+    # union
+    # poiner (object, function, nullptr)
+    # function
+    # void?
 
 
 @dataclass
@@ -20,7 +26,7 @@ class MemberMeta:
     name: str
     offset: int | None
     size: int  # maybe None
-    # TODO add consider CVR qualifiers in the type?
+    # TODO some are unnamed, some are bit-fields
 
 
 class BaseTypeEncoding(StrEnum):
@@ -60,15 +66,16 @@ class StructMeta(Meta):
 class EnumMeta(Meta):
     kind: Kind = field(init=False, default=Kind.enum)
     underlying_type: str | None  # some compiler doesn't provide an underlying type
+    enumerators: dict[str, int]
 
 
 class JSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, StrEnum):
-            return obj.value
-        if is_dataclass(obj):
-            return asdict(obj)
-        return json.JSONEncoder.default(self, obj)
+    def default(self, o):
+        if isinstance(o, StrEnum):
+            return o.value
+        if is_dataclass(o):
+            return asdict(o)
+        return json.JSONEncoder.default(self, o)
 
 
 # each executable should have one single type dict
