@@ -24,6 +24,7 @@ from .structdump import (
     MemberMeta,
     Meta,  # for export
 )
+from dataclasses import dataclass
 import logging
 
 
@@ -42,22 +43,36 @@ def find_sym_addr_size(elffile: ELFFile, symbol_name: str) -> tuple[int, int] | 
         return None
 
 
-# this function is recursive so the name should be converted to bytes at call site
-def _find_variable(die: DIE, var_name_bytes: bytes) -> DIE | None:
-    # TODO poor performance when finding in a large elf, improve
-    if die.tag == DW_TAG.variable:
-        name = die.attributes.get(DW_AT.name)
-        if name is not None and name.value == var_name_bytes:
-            return die
-    for c in die.iter_children():
-        d = _find_variable(c, var_name_bytes)
-        if d is not None:
-            return d
+def find_variable_in_cu(cu: DIE, bname: bytes):
+    for child in cu.iter_children():
+        if child.tag == DW_TAG.variable:
+            name = child.attributes.get(DW_AT.name)
+            if name and name.value == bname:
+                return child
     return None
 
 
-def find_variable(die: DIE, var_name: str):
-    return _find_variable(die, bytes(var_name, "ascii"))
+# faster than recursive search, still poor performance if srcname is not used
+# only look at depth level 1 so can only find plain global variables
+# cannot find static variable in a function, in a class, in a namespace
+# srcname is the suffix of CU srcfile
+def find_variable(elf: ELFFile, var_name: str, srcname: str | None):
+    # FIXME its assumed encoding is ascii
+    # which may be wrong
+    bname = bytes(var_name, "ascii")
+    d = elf.get_dwarf_info()
+    if srcname:
+        bsrcname = bytes(srcname, "ascii")
+        for cu in d.iter_CUs():
+            die = cu.get_top_DIE()
+            cuname = die.attributes.get(DW_AT.name)
+            if cuname and cuname.value.endswith(bsrcname):
+                return find_variable_in_cu(die, bname)
+        return None
+    for cu in d.iter_CUs():
+        die = cu.get_top_DIE()
+        find_variable_in_cu(die, bname)
+    return None
 
 
 def print_prefix(prefix: str, member: Member):
@@ -191,8 +206,19 @@ def process_top_type(original_type: DIE) -> tuple[str, TypeDict]:
     return original_type_name, td
 
 
+@dataclass
+class GetTypeDictResult:
+    typename: str
+    typedict: TypeDict
+    is_little_endian: bool
+    addr: int
+    size: int
+
+
 # return variable's type name, type dict, and is_little_endian
-def get_type_dict(filename: str, var_name: str) -> tuple[str, TypeDict, bool]:
+def get_type_dict(
+    filename: str, var_name: str, srcsuffix: str | None = None
+) -> GetTypeDictResult:
     with open(filename, "rb") as file:
         elf = ELFFile(file)  # need to keep file open when elf is being used
         rst = find_sym_addr_size(elf, var_name)
@@ -202,14 +228,10 @@ def get_type_dict(filename: str, var_name: str) -> tuple[str, TypeDict, bool]:
         logging.info(f"{var_name} is at addr {addr:#x}, has size {size}")
         if not elf.has_dwarf_info():
             raise ValueError("No DWARF info")
-        d = elf.get_dwarf_info()
-        var = None
-        for cu in d.iter_CUs():
-            die = cu.get_top_DIE()
-            var = find_variable(die, var_name)
-            if var is not None:
-                break
+        var = find_variable(elf, var_name, srcsuffix)
         if var is None:
             raise ValueError(f"Variable {var_name} not found in .debug_info")
         var_type = get_DW_AT_type(var)
-        return *process_top_type(var_type), elf.little_endian
+        return GetTypeDictResult(
+            *process_top_type(var_type), elf.little_endian, addr, size
+        )

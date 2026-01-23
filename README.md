@@ -83,7 +83,13 @@ add examples
 - read variable's initial value from elf
 - generate functions to serialize/deserialize a struct
 - accept non-struct variables
-- accept multiple variables
+- accept multiple variables, types in one elf (including export json file)
 - accept non-variable symbol, like type names
 - correctly handle union, atomic types
 - build type dict dynamically
+
+
+
+pyelftools
+dwarf explorer
+llvm-dwarfdump

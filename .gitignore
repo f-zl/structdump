@@ -1,3 +1,6 @@
 /.vscode/
 __pycache__/
 /dist/
+/pkg/
+/src/python-build*/
+/src/structdump-0.1.0/

@@ -94,3 +94,39 @@ union, bitfield先不考虑
 
 ## 数据结构
 C结构体是一个树结构，可以用类DWARF的格式
+
+
+测试用例设计
+各基本类型
+int/unsigned int
+long/unsigned long
+short/unsigned short
+long long/unsigned long long
+char
+signed char/unsigned char
+bool
+float
+double
+long double
+fixed-length int
+enum
+
+Qualifier
+const
+volatile
+restrict
+atomic
+alignas
+
+nullptr
+对象指针
+函数指针
+
+复合类型
+array
+struct
+bit-field
+union
+(string)
+multi-dimension array
+nested composite type (anonymous struct)
