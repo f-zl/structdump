@@ -15,17 +15,20 @@ from .dwarf import (
     DW_AT,
     DW_TAG,
 )
-from .structdump import (
+from .meta import (
     TypeDict,
     BaseTypeEncoding,
     BaseTypeMeta,
     StructMeta,
     EnumMeta,
     MemberMeta,
-    Meta,  # for export
+    # for export
+    Kind,
+    Meta,
 )
 from dataclasses import dataclass
 import logging
+from os import PathLike
 
 
 # return addr, size tuple if found
@@ -44,6 +47,10 @@ def find_sym_addr_size(elffile: ELFFile, symbol_name: str) -> tuple[int, int] | 
 
 
 def find_variable_in_cu(cu: DIE, bname: bytes):
+    if cu.tag == DW_TAG.variable:
+        name = cu.attributes.get(DW_AT.name)
+        if name and name.value == bname:
+            return cu
     for child in cu.iter_children():
         if child.tag == DW_TAG.variable:
             name = child.attributes.get(DW_AT.name)
@@ -69,6 +76,7 @@ def find_variable(elf: ELFFile, var_name: str, srcname: str | None):
             if cuname and cuname.value.endswith(bsrcname):
                 return find_variable_in_cu(die, bname)
         return None
+    # FIXME 这里没有递归找，只找了1层
     for cu in d.iter_CUs():
         die = cu.get_top_DIE()
         find_variable_in_cu(die, bname)
@@ -217,7 +225,7 @@ class GetTypeDictResult:
 
 # return variable's type name, type dict, and is_little_endian
 def get_type_dict(
-    filename: str, var_name: str, srcsuffix: str | None = None
+    filename: PathLike, var_name: str, srcsuffix: str | None = None
 ) -> GetTypeDictResult:
     with open(filename, "rb") as file:
         elf = ELFFile(file)  # need to keep file open when elf is being used

@@ -1,4 +1,4 @@
-from structdump import get_type_dict, structdump
+from structdump import get_type_dict, meta
 import json
 
 if __name__ == "__main__":
@@ -10,4 +10,4 @@ if __name__ == "__main__":
     parser.add_argument("--srcsuffix", help="suffix of src file")
     args = parser.parse_args()
     r = get_type_dict(args.file, args.variable, args.srcsuffix)
-    print(json.dumps(r, cls=structdump.JSONEncoder))
+    print(json.dumps(r, cls=meta.JSONEncoder))

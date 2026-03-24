@@ -23,10 +23,10 @@ class Kind(StrEnum):
 @dataclass
 class MemberMeta:
     type: str  # the type in the struct declaration, array's type is like int[3]
-    name: str
+    name: str | None  # maybe unnamed
     offset: int | None
     size: int  # maybe None
-    # TODO some are unnamed, some are bit-fields
+    # TODO support bit-fields
 
 
 class BaseTypeEncoding(StrEnum):
@@ -65,7 +65,7 @@ class StructMeta(Meta):
 @dataclass
 class EnumMeta(Meta):
     kind: Kind = field(init=False, default=Kind.enum)
-    underlying_type: str | None  # some compiler doesn't provide an underlying type
+    underlying_type: str | None  # some compilers don't provide an underlying type
     enumerators: dict[str, int]
 
 
@@ -82,4 +82,38 @@ class JSONEncoder(json.JSONEncoder):
 # it is not supported that multuple types share the same name
 class TypeDict(dict[str, Meta]):
     def to_json(self):
-        return json.dumps(self, cls=JSONEncoder)
+        # specify separator to remove whitespace
+        return json.dumps(self, cls=JSONEncoder, separators=(",", ":"))
+
+    @staticmethod
+    def from_json(jsonstr: str) -> "TypeDict":
+        raw_dict = json.loads(jsonstr)
+        type_dict = TypeDict()
+        for key, value in raw_dict.items():
+            kind_str = value.get("kind")
+            match kind_str:
+                case Kind.base:
+                    encoding = BaseTypeEncoding(value["encoding"])
+                    meta = BaseTypeMeta(
+                        name=value["name"], size=value["size"], encoding=encoding
+                    )
+                case Kind.enum:
+                    meta = EnumMeta(
+                        name=value["name"],
+                        size=value["size"],
+                        underlying_type=value.get("underlying_type"),
+                        enumerators=value["enumerators"],
+                    )
+                case Kind.struct:
+                    members = [MemberMeta(**m) for m in value["members"]]
+                    meta = StructMeta(
+                        name=value["name"], size=value["size"], members=members
+                    )
+                case Kind.array:
+                    raise ValueError("array kind should not be present")
+                case Kind.atomic:
+                    raise NotImplementedError()
+                case _:
+                    raise NotImplementedError()
+            type_dict[key] = meta
+        return type_dict
