@@ -46,16 +46,23 @@ def find_sym_addr_size(elffile: ELFFile, symbol_name: str) -> tuple[int, int] | 
         return None
 
 
-def find_variable_in_cu(cu: DIE, bname: bytes):
-    if cu.tag == DW_TAG.variable:
-        name = cu.attributes.get(DW_AT.name)
-        if name and name.value == bname:
-            return cu
+def find_variable_in_die(die: DIE, bname: bytes) -> DIE | None:
+    if die.tag == DW_TAG.variable:
+        name = die.attributes.get(DW_AT.name)
+        if name is not None and name.value == bname:
+            return die
+    for c in die.iter_children():
+        d = find_variable_in_die(c, bname)
+        if d is not None:
+            return d
+    return None
+
+
+def find_variable_in_cu(cu: DIE, bname: bytes) -> DIE | None:
     for child in cu.iter_children():
-        if child.tag == DW_TAG.variable:
-            name = child.attributes.get(DW_AT.name)
-            if name and name.value == bname:
-                return child
+        rst = find_variable_in_die(child, bname)
+        if rst is not None:
+            return rst
     return None
 
 
@@ -74,12 +81,16 @@ def find_variable(elf: ELFFile, var_name: str, srcname: str | None):
             die = cu.get_top_DIE()
             cuname = die.attributes.get(DW_AT.name)
             if cuname and cuname.value.endswith(bsrcname):
-                return find_variable_in_cu(die, bname)
+                # there maybe multiple files has that suffix
+                rst = find_variable_in_cu(die, bname)
+                if rst is not None:
+                    return rst
         return None
-    # FIXME 这里没有递归找，只找了1层
     for cu in d.iter_CUs():
         die = cu.get_top_DIE()
-        find_variable_in_cu(die, bname)
+        rst = find_variable_in_cu(die, bname)
+        if rst is not None:
+            return rst
     return None
 
 

@@ -16,6 +16,10 @@ class TestToJson(unittest.TestCase):
         td2 = td.typedict.from_json(s)
         self.assertEqual(td2, td.typedict)
 
+    def test_find_without_suffix(self):
+        _td = structdump.get_type_dict(Path(__file__) / "../../example/a.out", "g_s")
+        # pass if no exception is raised
+
 
 if __name__ == "__main__":
     unittest.main()
