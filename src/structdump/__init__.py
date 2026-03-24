@@ -70,25 +70,21 @@ def find_variable_in_cu(cu: DIE, bname: bytes) -> DIE | None:
 # only look at depth level 1 so can only find plain global variables
 # cannot find static variable in a function, in a class, in a namespace
 # srcname is the suffix of CU srcfile
-def find_variable(elf: ELFFile, var_name: str, srcname: str | None):
-    # FIXME its assumed encoding is ascii
-    # which may be wrong
-    bname = bytes(var_name, "ascii")
+def find_variable(elf: ELFFile, var_name: bytes, srcname: bytes | None):
     d = elf.get_dwarf_info()
     if srcname:
-        bsrcname = bytes(srcname, "ascii")
         for cu in d.iter_CUs():
             die = cu.get_top_DIE()
             cuname = die.attributes.get(DW_AT.name)
-            if cuname and cuname.value.endswith(bsrcname):
+            if cuname and cuname.value.endswith(srcname):
                 # there maybe multiple files has that suffix
-                rst = find_variable_in_cu(die, bname)
+                rst = find_variable_in_cu(die, var_name)
                 if rst is not None:
                     return rst
         return None
     for cu in d.iter_CUs():
         die = cu.get_top_DIE()
-        rst = find_variable_in_cu(die, bname)
+        rst = find_variable_in_cu(die, var_name)
         if rst is not None:
             return rst
     return None
@@ -247,7 +243,12 @@ def get_type_dict(
         logging.info(f"{var_name} is at addr {addr:#x}, has size {size}")
         if not elf.has_dwarf_info():
             raise ValueError("No DWARF info")
-        var = find_variable(elf, var_name, srcsuffix)
+        # FIXME var_name and srcsuffix may not be ascii
+        if srcsuffix is not None:
+            bsrcsuffix = bytes(srcsuffix, "ascii")
+        else:
+            bsrcsuffix = None
+        var = find_variable(elf, bytes(var_name, "ascii"), bsrcsuffix)
         if var is None:
             raise ValueError(f"Variable {var_name} not found in .debug_info")
         var_type = get_DW_AT_type(var)
