@@ -1,14 +1,28 @@
 # 需求
-dump C结构体的成员、类型、size、offset信息
+
+给定elf，变量名，dump其类型
+如果有初值，dump其初值
+如果是C结构体，则包含成员、类型、size、offset信息
 
 导出内容需要方便解析、阅读
 	由于是树结构，考虑用json
 	有些是公共节点，比如类型，可以有一张表来查，节点值只存key，key用字符串提高可读性
 
+基础，支持int/float/bool/enum/array/struct/嵌套array, struct
+后续支持bit-field, atomic, cvr qualifier, _BitN, 重名类型
 
-# 设计
+## 项目结构设计
+
+- 基本类型定义，包含了C类型
+- 序列化，反序列化，为最大化可用性(便于其他工具处理)，考虑用json
+	反序列化的校验较复杂
+	可以搭配json schema，用工具校验
+- cmdline
+
+## 设计
 
 例子
+
 ```c
 typedef struct {
 	int value[2];
@@ -93,8 +107,8 @@ type的取值
 union, bitfield先不考虑
 
 ## 数据结构
-C结构体是一个树结构，可以用类DWARF的格式
 
+C结构体是一个树结构，可以用类DWARF的格式
 
 测试用例设计
 各基本类型

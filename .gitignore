@@ -5,3 +5,4 @@ __pycache__/
 /pkg/
 /src/python-build*/
 /src/structdump-0.1.0/
+/example/*

@@ -185,10 +185,11 @@ class Member:
             # bit-fields may have no data_member_location
             return None
         value = data_member_location.value
-        if type(value) == int:
-            # elf produced by linux-x64-gcc falls in this
+        if type(value) is int:
+            # elf produced by linux-x64-gcc goes here
             return value
         if data_member_location.form.startswith("DW_FORM_block"):
+            # https://github.com/eliben/pyelftools/discussions/572
             # the value is an DWARF expression
             parser = dwarf_expr_parser(self.die)
             expr = parser.parse_expr(value)
